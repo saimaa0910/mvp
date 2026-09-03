@@ -1,0 +1,640 @@
+openapi: 3.0.3
+info:
+  title: Namma Clinic Digital Health & Operations Platform API
+  description: >
+    Production-grade RESTful API specification for the Namma Clinic Platform
+    under the Greater Bengaluru Authority (GBA) / BBMP Health Department.
+    Supports frontline clinic workflows, pharmacy stock management,
+    surveillance analytics, and ABDM interoperability.
+  version: 1.0.0
+  contact:
+    name: K Mati API Engineering Team
+    email: api-support@kmati.in
+    url: https://www.kmati.in
+servers:
+  - url: https://api.nammaclinic.bbmp.gov.in/api/v1
+    description: Production Environment (MeitY Government Cloud)
+  - url: https://staging-api.nammaclinic.bbmp.gov.in/api/v1
+    description: Staging & UAT Sandbox
+  - url: http://localhost:3000/api/v1
+    description: Local Development Server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ─── AUTHENTICATION ────────────────────────────────────────────────
+  /auth/login:
+    post:
+      summary: Authenticate clinic staff or administrator
+      description: Validates user credentials and returns an RS256-signed JWT token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: "dr.priya.ncw01"
+                password:
+                  type: string
+                  format: password
+                  example: "SecureP@ssw0rd2026!"
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  tokenType:
+                    type: string
+                    example: "Bearer"
+                  expiresInSeconds:
+                    type: integer
+                    example: 900
+                  user:
+                    $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Invalid credentials
+        '429':
+          description: Too many failed login attempts; account locked
+
+  # ─── PATIENTS & REGISTRATION ───────────────────────────────────────
+  /patients:
+    post:
+      summary: Register a new citizen patient profile
+      description: Creates a unique master demographic record for a patient.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPatientRequest'
+      responses:
+        '201':
+          description: Patient registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '409':
+          description: Duplicate patient detected based on mobile number and DOB
+
+  /patients/search:
+    get:
+      summary: Search existing patients
+      description: Query registered patients by mobile number, clinic ID, ABHA number, or name.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 10-digit mobile number, Patient ID, or 14-digit ABHA
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Search matching list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Patient'
+
+  # ─── VISITS & QUEUE MANAGEMENT ─────────────────────────────────────
+  /visits:
+    post:
+      summary: Check in patient and issue daily queue token
+      description: Generates a sequential daily token (e.g., A001) and places patient in queue.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [patientId, clinicId, serviceCategory]
+              properties:
+                patientId:
+                  type: string
+                clinicId:
+                  type: string
+                  example: "NC-W-001"
+                serviceCategory:
+                  type: string
+                  enum: [GENERAL_OPD, FEVER, NCD_SCREENING, MCH, IMMUNIZATION]
+      responses:
+        '201':
+          description: Token issued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Visit'
+
+  /visits/{visitId}/vitals:
+    put:
+      summary: Record nursing triage vitals
+      description: Records physiological measurements and automatically evaluates warning/danger flags.
+      parameters:
+        - name: visitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VitalsCaptureRequest'
+      responses:
+        '200':
+          description: Vitals recorded and patient routed to doctor queue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  dangerFlag:
+                    type: boolean
+                  calculatedBmi:
+                    type: number
+
+  /visits/{visitId}/consultation:
+    post:
+      summary: Complete Doctor EMR consultation
+      description: Saves clinical notes, formal diagnoses, medication prescriptions, and referral orders.
+      parameters:
+        - name: visitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsultationSaveRequest'
+      responses:
+        '200':
+          description: Consultation completed; patient routed to pharmacy or discharged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  visitId:
+                    type: string
+                  prescriptionId:
+                    type: string
+                  bilingualPdfUrl:
+                    type: string
+
+  # ─── PHARMACY & DISPENSING ─────────────────────────────────────────
+  /pharmacy/pending:
+    get:
+      summary: Retrieve pending prescription queue for clinic
+      parameters:
+        - name: clinicId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of pending prescriptions awaiting dispensing
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Prescription'
+
+  /pharmacy/dispense:
+    post:
+      summary: Mark medication as dispensed and update stock ledger
+      description: Decrements on-hand stock and timestamps dispensing record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prescriptionId, clinicId, dispensedItems]
+              properties:
+                prescriptionId:
+                  type: string
+                clinicId:
+                  type: string
+                dispensedItems:
+                  type: array
+                  items:
+                    type: object
+                    required: [itemId, quantityDispensed, batchNumber]
+                    properties:
+                      itemId:
+                        type: string
+                      quantityDispensed:
+                        type: integer
+                      batchNumber:
+                        type: string
+      responses:
+        '200':
+          description: Medication dispensed successfully
+
+  /pharmacy/stock:
+    get:
+      summary: Query clinic stock ledger and reorder thresholds
+      parameters:
+        - name: clinicId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current inventory status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StockItem'
+
+  # ─── LAB & DIAGNOSTICS ─────────────────────────────────────────────
+  /lab/orders:
+    get:
+      summary: Retrieve pending lab investigations queue
+      parameters:
+        - name: clinicId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of ordered lab tests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LabOrder'
+
+  /lab/orders/{orderId}/result:
+    put:
+      summary: Enter and verify laboratory test result
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resultValue, interpretation]
+              properties:
+                resultValue:
+                  type: string
+                  example: "12.8 g/dL"
+                interpretation:
+                  type: string
+                  enum: [NORMAL, ABNORMAL_HIGH, ABNORMAL_LOW, POSITIVE, NEGATIVE]
+                technicianRemarks:
+                  type: string
+      responses:
+        '200':
+          description: Lab result verified and linked to encounter
+
+  # ─── REFERRALS ─────────────────────────────────────────────────────
+  /referrals:
+    post:
+      summary: Initiate external specialist or hospital referral
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReferralCreateRequest'
+      responses:
+        '201':
+          description: Referral created and SMS dispatched to citizen
+
+  # ─── ANALYTICS & DASHBOARDS ────────────────────────────────────────
+  /analytics/dashboard/{level}:
+    get:
+      summary: Retrieve analytical summary metrics for dashboards
+      parameters:
+        - name: level
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [CLINIC, ZONE, COMMISSIONER]
+        - name: entityId
+          in: query
+          description: Clinic ID or Zone Name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Real-time dashboard KPI payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMetrics'
+
+  # ─── ABDM INTEGRATION ──────────────────────────────────────────────
+  /abdm/verify-abha:
+    post:
+      summary: Validate 14-digit ABHA number via NHA ABDM Gateway
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [abhaNumber]
+              properties:
+                abhaNumber:
+                  type: string
+                  example: "12-3456-7890-0001"
+      responses:
+        '200':
+          description: Verified ABHA profile response
+
+  # ─── DATA PORTABILITY (ANTI-LOCK-IN) ────────────────────────────────
+  /portability/export:
+    post:
+      summary: Initiate asynchronous bulk dataset export (FHIR R4 / NDJSON)
+      description: Requires Administrative authorization.
+      responses:
+        '202':
+          description: Export job initiated; poll Content-Location header
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        userId:
+          type: string
+        fullName:
+          type: string
+        role:
+          type: string
+          enum: [RECEPTIONIST, NURSE, DOCTOR, PHARMACIST, LAB_TECH, CLINIC_ADMIN, ZONAL_MO, COMMISSIONER]
+        clinicId:
+          type: string
+        zone:
+          type: string
+
+    NewPatientRequest:
+      type: object
+      required: [fullName, age, gender, mobile]
+      properties:
+        fullName:
+          type: string
+          example: "Ramesh Kumar"
+        nameKannada:
+          type: string
+          example: "ರಮೇಶ್ ಕುಮಾರ್"
+        age:
+          type: integer
+          example: 52
+        gender:
+          type: string
+          enum: [MALE, FEMALE, OTHER]
+        mobile:
+          type: string
+          example: "9845012345"
+        address:
+          type: string
+          example: "Rajajinagar, Bengaluru"
+        abhaId:
+          type: string
+          example: "12-3456-7890-0001"
+        bloodGroup:
+          type: string
+          example: "B+"
+
+    Patient:
+      allOf:
+        - $ref: '#/components/schemas/NewPatientRequest'
+        - type: object
+          properties:
+            patientId:
+              type: string
+              example: "NC-2026-001"
+            createdAt:
+              type: string
+              format: date-time
+
+    Visit:
+      type: object
+      properties:
+        visitId:
+          type: string
+        patientId:
+          type: string
+        token:
+          type: string
+          example: "A001"
+        serviceCategory:
+          type: string
+        queueStatus:
+          type: string
+          enum: [WAITING, TRIAGE, WITH_DOCTOR, PHARMACY, LAB, DONE]
+        dangerFlag:
+          type: boolean
+
+    VitalsCaptureRequest:
+      type: object
+      required: [bpSystolic, bpDiastolic, pulseRate, bodyTemperature, oxygenSaturation]
+      properties:
+        bpSystolic:
+          type: integer
+          example: 158
+        bpDiastolic:
+          type: integer
+          example: 98
+        pulseRate:
+          type: integer
+          example: 84
+        bodyTemperature:
+          type: number
+          example: 37.1
+        oxygenSaturation:
+          type: integer
+          example: 97
+        randomBloodSugar:
+          type: integer
+          example: 245
+        bodyWeight:
+          type: number
+          example: 78.0
+        bodyHeight:
+          type: number
+          example: 168.0
+        chiefComplaints:
+          type: array
+          items:
+            type: string
+          example: ["Headache", "Dizziness"]
+
+    ConsultationSaveRequest:
+      type: object
+      required: [diagnosis, prescriptions]
+      properties:
+        clinicalNotes:
+          type: string
+        diagnosis:
+          type: string
+          example: "Essential Hypertension - Uncontrolled"
+        icd10Code:
+          type: string
+          example: "I10"
+        prescriptions:
+          type: array
+          items:
+            type: object
+            required: [medicineName, dosage, frequency, durationDays, instructionsEn]
+            properties:
+              medicineName:
+                type: string
+                example: "Amlodipine 5mg"
+              dosage:
+                type: string
+                example: "1 tablet"
+              frequency:
+                type: string
+                example: "Once daily"
+              durationDays:
+                type: integer
+                example: 30
+              instructionsEn:
+                type: string
+                example: "After meals"
+              instructionsKn:
+                type: string
+                example: "ಊಟದ ನಂತರ"
+        labOrders:
+          type: array
+          items:
+            type: string
+          example: ["Complete Blood Count (CBC)"]
+        referral:
+          type: object
+          properties:
+            destination:
+              type: string
+              example: "Victoria Hospital (Cardiology)"
+            reason:
+              type: string
+
+    Prescription:
+      type: object
+      properties:
+        prescriptionId:
+          type: string
+        visitId:
+          type: string
+        patientName:
+          type: string
+        diagnosis:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+
+    StockItem:
+      type: object
+      properties:
+        medicineCode:
+          type: string
+        medicineName:
+          type: string
+        category:
+          type: string
+        currentStock:
+          type: integer
+        minThreshold:
+          type: integer
+        unit:
+          type: string
+        expiryDate:
+          type: string
+          format: date
+
+    LabOrder:
+      type: object
+      properties:
+        orderId:
+          type: string
+        testName:
+          type: string
+        status:
+          type: string
+          enum: [ORDERED, SAMPLE_COLLECTED, PROCESSING, RESULT_READY]
+        orderedAt:
+          type: string
+
+    ReferralCreateRequest:
+      type: object
+      required: [visitId, patientId, destinationFacility, clinicalReason, urgency]
+      properties:
+        visitId:
+          type: string
+        patientId:
+          type: string
+        destinationFacility:
+          type: string
+        clinicalReason:
+          type: string
+        urgency:
+          type: string
+          enum: [ROUTINE, PRIORITY, EMERGENCY]
+
+    DashboardMetrics:
+      type: object
+      properties:
+        todayFootfall:
+          type: integer
+        waitingCount:
+          type: integer
+        activeConsultations:
+          type: integer
+        completedConsultations:
+          type: integer
+        criticalDangerFlags:
+          type: integer
+        stockAlertsCount:
+          type: integer
+        openReferralsCount:
+          type: integer
