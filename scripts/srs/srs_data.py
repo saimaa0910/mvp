@@ -1,0 +1,60 @@
+import sys
+from pathlib import Path
+
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.srs.srs_data_fr import ALL_FUNCTIONAL_REQUIREMENTS
+from scripts.srs.srs_data_nfr import ALL_NON_FUNCTIONAL_REQUIREMENTS
+from scripts.srs.srs_data_specialized import (
+    ALL_SECURITY_REQUIREMENTS,
+    ALL_PRIVACY_REQUIREMENTS,
+    ALL_CLINICAL_REQUIREMENTS,
+    ALL_OPERATIONAL_REQUIREMENTS,
+    ALL_OFFLINE_REQUIREMENTS,
+    ALL_INTEGRATION_REQUIREMENTS,
+    ALL_DATA_REQUIREMENTS,
+    ALL_UI_REQUIREMENTS
+)
+
+SRS_ALL_REQUIREMENTS = [
+    *ALL_FUNCTIONAL_REQUIREMENTS,
+    *ALL_NON_FUNCTIONAL_REQUIREMENTS,
+    *ALL_SECURITY_REQUIREMENTS,
+    *ALL_PRIVACY_REQUIREMENTS,
+    *ALL_CLINICAL_REQUIREMENTS,
+    *ALL_OPERATIONAL_REQUIREMENTS,
+    *ALL_OFFLINE_REQUIREMENTS,
+    *ALL_INTEGRATION_REQUIREMENTS,
+    *ALL_DATA_REQUIREMENTS,
+    *ALL_UI_REQUIREMENTS
+]
+
+SRS_REQ_MAP = {r["id"]: r for r in SRS_ALL_REQUIREMENTS}
+
+TOTAL_SRS_REQUIREMENTS = len(SRS_ALL_REQUIREMENTS)
+TOTAL_SRS_FR = len(ALL_FUNCTIONAL_REQUIREMENTS)
+TOTAL_SRS_NFR = len(ALL_NON_FUNCTIONAL_REQUIREMENTS)
+TOTAL_SRS_SEC = len(ALL_SECURITY_REQUIREMENTS)
+TOTAL_SRS_PRIV = len(ALL_PRIVACY_REQUIREMENTS)
+TOTAL_SRS_CR = len(ALL_CLINICAL_REQUIREMENTS)
+TOTAL_SRS_OR = len(ALL_OPERATIONAL_REQUIREMENTS)
+TOTAL_SRS_OFF = len(ALL_OFFLINE_REQUIREMENTS)
+TOTAL_SRS_INT = len(ALL_INTEGRATION_REQUIREMENTS)
+TOTAL_SRS_DATA = len(ALL_DATA_REQUIREMENTS)
+TOTAL_SRS_UI = len(ALL_UI_REQUIREMENTS)
+
+if __name__ == "__main__":
+    print(f"Total SRS Requirements: {TOTAL_SRS_REQUIREMENTS}")
+    print(f"  Functional (FR):      {TOTAL_SRS_FR}")
+    print(f"  Non-Functional (NFR): {TOTAL_SRS_NFR}")
+    print(f"  Security (SEC):       {TOTAL_SRS_SEC}")
+    print(f"  Privacy (PRIV):       {TOTAL_SRS_PRIV}")
+    print(f"  Clinical (CR):        {TOTAL_SRS_CR}")
+    print(f"  Operational (OR):     {TOTAL_SRS_OR}")
+    print(f"  Offline (OFF):        {TOTAL_SRS_OFF}")
+    print(f"  Integration (INT):    {TOTAL_SRS_INT}")
+    print(f"  Data (DATA):          {TOTAL_SRS_DATA}")
+    print(f"  UI & A11y (UI):       {TOTAL_SRS_UI}")
